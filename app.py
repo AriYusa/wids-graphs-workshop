@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_agraph import Config, Edge, Node, agraph
 
 from graph_utils import (
-    build_pyvis_html,
+    build_agraph_payload,
     build_shown_graph,
     compute_global_stats,
     compute_node_stats,
@@ -28,21 +28,14 @@ def get_data():
     return load_data("data/nodes.csv", "data/edges.csv")
 
 
-def format_artist_option(row):
-    return f"{row['name']} | popularity={int(row['popularity'])} | id={row['spotify_id']}"
-
-
 def build_state():
     nodes_df, _ = get_data()
 
     if "shown_node_ids" not in st.session_state:
-        st.session_state.shown_node_ids = set(get_initial_node_ids(nodes_df, total=20, step=10))
+        st.session_state.shown_node_ids = set(get_initial_node_ids(nodes_df, total=20, step=5))
 
     if "selected_node_id" not in st.session_state:
         st.session_state.selected_node_id = None
-
-    if "last_remove_report" not in st.session_state:
-        st.session_state.last_remove_report = None
 
 
 def render_global_stats(stats):
@@ -73,13 +66,14 @@ def render_node_stats(node_stats):
     c7.metric("Popularity", int(node_stats["popularity"]))
 
     st.caption(
-        f"Followers: {int(node_stats['followers'])} | Genres: {node_stats['genres']} | Chart hits: {node_stats['chart_hits']}"
+        f"Followers: {int(node_stats['followers'])} | Genres: {node_stats['genres']}"
     )
 
 
 def main():
     nodes_df, edges_df = get_data()
     build_state()
+    name_by_id = dict(zip(nodes_df["spotify_id"].astype(str), nodes_df["name"].astype(str)))
 
     st.title("Learning To See Data: Artist Collaboration Network")
     st.write(
@@ -98,37 +92,40 @@ def main():
         if st.button("Reset to Initial 20 Nodes", use_container_width=True):
             st.session_state.shown_node_ids = set(get_initial_node_ids(nodes_df, total=20, step=10))
             st.session_state.selected_node_id = None
-            st.session_state.last_remove_report = None
             st.rerun()
 
         st.markdown("### Inspect Node")
-        shown_options = [
-            (nid, shown_graph.nodes[nid].get("name", nid))
-            for nid in sorted(shown_graph.nodes(), key=lambda x: shown_graph.nodes[x].get("name", ""))
-        ]
-        shown_labels = [f"{name} | {nid}" for nid, name in shown_options]
+        shown_options = sorted(
+            list(shown_graph.nodes()),
+            key=lambda nid: name_by_id.get(str(nid), str(nid)).lower(),
+        )
 
-        if shown_labels:
-            selected_label = st.selectbox(
+        if shown_options:
+            selected_id = st.selectbox(
                 "Pick node for stats",
-                shown_labels,
+                shown_options,
                 index=0,
-                key="selected_node_label",
+                key="selected_node_id_select",
+                format_func=lambda nid: name_by_id.get(str(nid), str(nid)),
             )
-            selected_id = selected_label.split(" | ")[-1]
             st.session_state.selected_node_id = selected_id
         else:
             st.session_state.selected_node_id = None
 
         st.markdown("### Remove Node")
-        remove_label = st.selectbox("Remove from shown graph", ["None"] + shown_labels, key="remove_node_label")
+        remove_options = [None] + shown_options
+        remove_id = st.selectbox(
+            "Remove from shown graph",
+            remove_options,
+            key="remove_node_id_select",
+            format_func=lambda nid: "None" if nid is None else name_by_id.get(str(nid), str(nid)),
+        )
         if st.button("Remove Node", use_container_width=True):
-            if remove_label != "None":
-                node_id = remove_label.split(" | ")[-1]
+            if remove_id is not None:
+                node_id = str(remove_id)
                 report = remove_node_with_report(shown_graph, node_id)
                 if node_id in st.session_state.shown_node_ids:
                     st.session_state.shown_node_ids.remove(node_id)
-                st.session_state.last_remove_report = report
                 if st.session_state.selected_node_id == node_id:
                     st.session_state.selected_node_id = None
                 st.rerun()
@@ -137,47 +134,48 @@ def main():
         addable_df = get_addable_artists(nodes_df, st.session_state.shown_node_ids)
         if len(addable_df) > 0:
             add_preview = addable_df.head(1500).copy()
-            add_preview["label"] = add_preview.apply(format_artist_option, axis=1)
-            add_label = st.selectbox("Search and add artist", add_preview["label"].tolist(), key="add_artist_label")
+            add_ids = add_preview["spotify_id"].astype(str).tolist()
+            add_id = st.selectbox(
+                "Search and add artist",
+                add_ids,
+                key="add_artist_id_select",
+                format_func=lambda nid: name_by_id.get(str(nid), str(nid)),
+            )
 
             if st.button("Add Artist + Existing Collabs", use_container_width=True):
-                add_id = add_label.split(" | id=")[-1]
-                st.session_state.shown_node_ids.add(add_id)
+                st.session_state.shown_node_ids.add(str(add_id))
                 st.rerun()
         else:
             st.caption("No more artists available to add.")
 
         st.markdown("### Notes")
-        st.caption(
-            "In Streamlit + Pyvis, direct click callbacks to Python are limited. "
-            "Use this sidebar selector for exact node stats and controls."
-        )
+        st.caption("Left click a node in the graph to inspect it. Use Delete Selected Node for fast removal.")
+
+    agraph_nodes_raw, agraph_edges_raw = build_agraph_payload(shown_graph, partition)
+    agraph_nodes = [Node(**n) for n in agraph_nodes_raw]
+    agraph_edges = [Edge(**e) for e in agraph_edges_raw]
+    graph_config = Config(
+        width="100%",
+        height=680,
+        directed=False,
+        physics=True,
+        hierarchical=False,
+        nodeHighlightBehavior=True,
+        highlightColor="#F7A7A6",
+        collapsible=False,
+    )
+
+    clicked_node_id = agraph(nodes=agraph_nodes, edges=agraph_edges, config=graph_config)
+    if clicked_node_id and clicked_node_id in shown_graph:
+        st.session_state.selected_node_id = clicked_node_id
 
     selected_node_id = st.session_state.selected_node_id
     node_stats = compute_node_stats(shown_graph, selected_node_id, partition) if selected_node_id else {}
 
-    html = build_pyvis_html(shown_graph, partition, selected_node=selected_node_id, height_px=640)
-    components.html(html, height=680, scrolling=False)
-
     st.subheader("Shown Graph Stats")
     render_global_stats(global_stats)
-    st.caption(f"Top by degree: {global_stats['top_degree']}")
 
     render_node_stats(node_stats)
-
-    if st.session_state.last_remove_report:
-        before = st.session_state.last_remove_report["before"]
-        after = st.session_state.last_remove_report["after"]
-        st.subheader("Robustness: Before vs After Removal")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Components", after["components"], delta=after["components"] - before["components"])
-        c2.metric(
-            "Largest Component",
-            after["largest_component"],
-            delta=after["largest_component"] - before["largest_component"],
-        )
-        c3.metric("Density", f"{after['density']:.4f}", delta=f"{after['density'] - before['density']:.4f}")
-
 
 if __name__ == "__main__":
     main()

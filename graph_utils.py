@@ -255,3 +255,52 @@ def get_addable_artists(nodes_df: pd.DataFrame, shown_ids: Iterable[str]) -> pd.
     addable = nodes_df[~nodes_df["spotify_id"].astype(str).isin(shown_set)].copy()
     addable = addable.sort_values(["popularity", "followers"], ascending=[False, False])
     return addable
+
+
+def build_agraph_payload(g: nx.Graph, partition: Dict[str, int]) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    """Convert shown graph to streamlit-agraph payload dictionaries."""
+    colors = _palette()
+    nodes: List[Dict[str, object]] = []
+    edges: List[Dict[str, object]] = []
+
+    if g.number_of_nodes() > 1:
+        degree_centrality = nx.degree_centrality(g)
+        betweenness = nx.betweenness_centrality(g)
+        closeness = nx.closeness_centrality(g)
+    else:
+        degree_centrality = {n: 0.0 for n in g.nodes()}
+        betweenness = {n: 0.0 for n in g.nodes()}
+        closeness = {n: 0.0 for n in g.nodes()}
+
+    for node_id, attrs in g.nodes(data=True):
+        community = partition.get(node_id, 0)
+        degree = g.degree(node_id)
+        size = DEFAULT_NODE_SIZE + min(18, degree * 2)
+
+        title = (
+            f"{attrs.get('name', node_id)}\n"
+            f"Popularity: {attrs.get('popularity', 0)}\n"
+            f"Followers: {int(attrs.get('followers', 0))}\n"
+            f"Degree: {degree}\n"
+            f"Degree centrality: {degree_centrality.get(node_id, 0.0):.4f}\n"
+            f"Betweenness: {betweenness.get(node_id, 0.0):.4f}\n"
+            f"Closeness: {closeness.get(node_id, 0.0):.4f}\n"
+            f"Clustering: {nx.clustering(g, node_id) if g.number_of_edges() else 0.0:.4f}\n"
+            f"Community: {community}"
+        )
+
+        nodes.append(
+            {
+                "id": str(node_id),
+                "label": _truncate(str(attrs.get("name", node_id))),
+                "title": title,
+                "size": size,
+                "color": colors[community % len(colors)],
+                "shape": "dot",
+            }
+        )
+
+    for source, target in g.edges():
+        edges.append({"source": str(source), "target": str(target), "color": "#97a6b2"})
+
+    return nodes, edges
