@@ -42,36 +42,16 @@ def build_state():
 
 
 def render_global_stats(stats):
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2 = st.columns(2)
     c1.metric(
-        "Artists",
-        stats["nodes"],
-        help="Nodes",
-    )
-    c2.metric(
-        "Connections",
-        stats["edges"],
-        help="Edges",
-    )
-    c3.metric(
         "Density",
         f"{stats['density']:.4f}",
         help="How full the network is with connections (0 to 1)",
     )
-    c4.metric(
+    c2.metric(
         "Avg Collabs Per Artist",
         f"{stats['avg_degree']:.2f}",
         help="Avg Degree is the average number of collaborators per artist",
-    )
-    c5.metric(
-        "Disconnected Groups",
-        stats["components"],
-        help="Number of separate groups in the network",
-    )
-    c6.metric(
-        "Biggest Group Size",
-        stats["largest_component"],
-        help="Size of the biggest connected artist group",
     )
 
 
@@ -81,18 +61,13 @@ def render_node_stats(node_stats):
         return
 
     st.markdown(f"**{node_stats['name']}**")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2 = st.columns(2)
     c1.metric(
         "Direct Collaborators",
         node_stats["degree"],
         help="Degree is the number of artists directly connected to this artist",
     )
     c2.metric(
-        "Connection Score",
-        f"{node_stats['degree_centrality']:.4f}",
-        help="Degree Centrality is the share of possible artists this artist is connected to (0 to 1)",
-    )
-    c3.metric(
         "Betweenness",
         f"{node_stats['betweenness']:.4f}",
         help="Betweenness is how often this artist links other artists through shortest paths.",
@@ -209,11 +184,11 @@ def main():
         else:
             st.caption("No more artists available to add.")
 
+        st.markdown("### Graph Stats")
+        render_global_stats(global_stats)
+
         st.markdown("### Artist Stats")
         node_stats_placeholder = st.container()
-
-    st.markdown("**Network Snapshot**")
-    render_global_stats(global_stats)
 
     clicked_node_id = agraph(nodes=agraph_nodes, edges=agraph_edges, config=graph_config)
     if clicked_node_id and clicked_node_id in shown_graph:

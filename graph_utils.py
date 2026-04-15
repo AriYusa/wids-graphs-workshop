@@ -417,7 +417,7 @@ def build_agraph_payload(
             "size": size,
             "color": _genre_color(attrs.get("main_genre", "Other")),
             "shape": "dot",
-            "font": {"size": 18},
+            "font": {"size": 28},
             "x": x,
             "y": y,
         }
